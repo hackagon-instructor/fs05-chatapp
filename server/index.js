@@ -8,6 +8,7 @@ const socketIO = require('socket.io');
 
 // my packages
 const { generateMessage, generateLocation } = require('./helper/messageTemplate');
+const Room = require('./models/Room');
 
 // create server
 const app = express();
@@ -19,19 +20,33 @@ const io = socketIO(server);
 const publicPath = path.join(`${__dirname}/../public`)
 app.use(express.static(publicPath))
 
+const newRoom = new Room();
 // MAIN PROCESS - CHAT APP
 io.on("connection", (socket) => {
+  socket.on('clientConnection', msg => {
+    const { name, room } = msg;
+    const user = {
+      id: socket.id,
+      name, room
+    }
+    newRoom.createUser(user)
+    socket.join(room);
 
-  socket.on("clientMessage", msg => {
-    io.emit("fromServer", generateMessage(msg.from, msg.content))
-  })
+    socket.on("clientMessage", msg => {
+      io.to(room).emit("fromServer", generateMessage(msg.from, msg.content))
+    })
+    socket.on("sendLocation", msg => {
+      io.to(room).emit("sendLocationToOthers", generateLocation(msg.from, msg.lat, msg.lng))
+    })
+    socket.broadcast.to(room).emit("fromServer", generateMessage("Admin", `${name} joined room`))
+    io.to(room).emit("userList", { userList: newRoom.users })
+    socket.emit("fromServer", generateMessage("Admin", "Welcome to chat app"))
 
-  socket.on("sendLocation", msg => {
-    io.emit("sendLocationToOthers", generateLocation(msg.from, msg.lat, msg.lng))
-  })
-
-  socket.on("disconnect", () => {
-    console.log("User left")
+    socket.on("disconnect", () => {
+      newRoom.deleteUserById(socket.id);
+      io.to(room).emit("userList", { userList: newRoom.users })
+      io.to(room).emit("fromServer", generateMessage("Admin", `${name} left`))
+    })
   })
 })
 
